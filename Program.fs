@@ -26,6 +26,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *)
 open System
 open System.IO
+open System.Linq
 open System.Net.Http
 open System.Net.Http.Json
 open System.Text.Json
@@ -34,20 +35,32 @@ type Definition = { Definition: string }
 type DefinitionList = { List: Definition list }
 
 let terms = File.ReadAllLines("terms.txt")
-let index = Random().Next(terms.Length)
-let term = terms[index]
-printfn "# %s\n" term
+let triedTerms = File.ReadAllLines("tried-terms.txt").ToHashSet()
 
-async { 
-    use client = new HttpClient()
-    use request = new HttpRequestMessage(
-        Method = HttpMethod.Get,
-        RequestUri = new Uri($"https://mashape-community-urban-dictionary.p.rapidapi.com/define?term={Uri.EscapeDataString(term)}"))
-    request.Headers.Add("X-RapidAPI-Key", "<SIGN UP FOR AN API KEY>")
-    request.Headers.Add("X-RapidAPI-Host", "mashape-community-urban-dictionary.p.rapidapi.com")
-    let! httpResponseMessage = client.SendAsync(request) |> Async.AwaitTask
-    httpResponseMessage.EnsureSuccessStatusCode() |> ignore
-    let! body = httpResponseMessage.Content.ReadFromJsonAsync<DefinitionList>(JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)) |> Async.AwaitTask
-    let definitions = body.List |> List.fold (fun s d -> s + "\n\n- " + d.Definition.ReplaceLineEndings(" ")) ""
-    printfn "%s" definitions
-} |> Async.RunSynchronously
+let rec pickTerm () =
+    let index = Random().Next(terms.Length)
+    let term = terms[index]
+    if triedTerms.Add(term) then term else pickTerm ()
+
+let rec defineTerm () =
+    let term = pickTerm ()
+    printfn "# %s\n" term
+    let definition =
+        async { 
+            use client = new HttpClient()
+            use request = new HttpRequestMessage(
+                Method = HttpMethod.Get,
+                RequestUri = new Uri($"https://mashape-community-urban-dictionary.p.rapidapi.com/define?term={Uri.EscapeDataString(term)}"))
+            request.Headers.Add("X-RapidAPI-Key", "<SIGN UP FOR AN API KEY>")
+            request.Headers.Add("X-RapidAPI-Host", "mashape-community-urban-dictionary.p.rapidapi.com")
+            let! httpResponseMessage = client.SendAsync(request) |> Async.AwaitTask
+            httpResponseMessage.EnsureSuccessStatusCode() |> ignore
+            let! body = httpResponseMessage.Content.ReadFromJsonAsync<DefinitionList>(JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)) |> Async.AwaitTask
+            return body.List |> List.fold (fun s d -> s + "\n\n- " + d.Definition.ReplaceLineEndings(" ")) ""
+        } |> Async.RunSynchronously
+    if definition.Length > 0 then definition else defineTerm ()
+
+let definition = defineTerm ()
+printfn "%s" definition
+File.WriteAllLines("tried-terms.txt.part", triedTerms)
+File.Move("tried-terms.txt.part", "tried-terms.txt", overwrite=true)
