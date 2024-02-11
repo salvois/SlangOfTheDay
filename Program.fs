@@ -1,7 +1,7 @@
 ﻿(*
 Slang of the day - Toy application to look up the meaning of slang expressions
 
-Copyright 2023 Salvatore ISAJA. All rights reserved.
+Copyright 2023-2024  Salvatore ISAJA. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -42,22 +42,24 @@ let rec pickTerm () =
     let term = terms[index]
     if triedTerms.Add(term) then term else pickTerm ()
 
+let fetchDefinition term =
+    task { 
+        use client = new HttpClient()
+        use request = new HttpRequestMessage(
+            Method = HttpMethod.Get,
+            RequestUri = new Uri($"https://mashape-community-urban-dictionary.p.rapidapi.com/define?term={Uri.EscapeDataString(term)}"))
+        request.Headers.Add("X-RapidAPI-Key", "<SIGN UP FOR AN API KEY>")
+        request.Headers.Add("X-RapidAPI-Host", "mashape-community-urban-dictionary.p.rapidapi.com")
+        let! httpResponseMessage = client.SendAsync(request)
+        httpResponseMessage.EnsureSuccessStatusCode() |> ignore
+        let! body = httpResponseMessage.Content.ReadFromJsonAsync<DefinitionList>(JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase))
+        return body.List |> List.fold (fun s d -> s + "\n\n- " + d.Definition.ReplaceLineEndings(" ")) ""
+    }
+
 let rec defineTerm () =
     let term = pickTerm ()
     printfn "# %s\n" term
-    let definition =
-        async { 
-            use client = new HttpClient()
-            use request = new HttpRequestMessage(
-                Method = HttpMethod.Get,
-                RequestUri = new Uri($"https://mashape-community-urban-dictionary.p.rapidapi.com/define?term={Uri.EscapeDataString(term)}"))
-            request.Headers.Add("X-RapidAPI-Key", "<SIGN UP FOR AN API KEY>")
-            request.Headers.Add("X-RapidAPI-Host", "mashape-community-urban-dictionary.p.rapidapi.com")
-            let! httpResponseMessage = client.SendAsync(request) |> Async.AwaitTask
-            httpResponseMessage.EnsureSuccessStatusCode() |> ignore
-            let! body = httpResponseMessage.Content.ReadFromJsonAsync<DefinitionList>(JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)) |> Async.AwaitTask
-            return body.List |> List.fold (fun s d -> s + "\n\n- " + d.Definition.ReplaceLineEndings(" ")) ""
-        } |> Async.RunSynchronously
+    let definition = (fetchDefinition term).Result
     if definition.Length > 0 then definition else defineTerm ()
 
 let definition = defineTerm ()
